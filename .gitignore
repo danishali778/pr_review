@@ -42,3 +42,6 @@ private-key.pem
 
 # Docs folder
 docs/
+
+# Local SQLite Database
+jules_reviewer.db
