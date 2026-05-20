@@ -1,6 +1,6 @@
+from typing import Optional
 from dataclasses import dataclass
-from github import Github
-from github.PullRequest import PullRequest
+from github import Github, PullRequest
 from src.utils.logger import log
 
 
@@ -69,19 +69,24 @@ class GitHubClient:
         repo: str,
         pr_number: int,
         review_body: str,
+        comments: Optional[list[dict]] = None,
     ) -> str:
-        """Post a structured review comment on a PR (shows in Reviews section)."""
+        """Post a structured review comment on a PR (shows in Reviews section) with optional inline comments."""
         log.info(f"Posting review on {owner}/{repo}#{pr_number}...")
 
         repository = self._gh.get_repo(f"{owner}/{repo}")
         pr: PullRequest = repository.get_pull(pr_number)
 
-        pr.create_review(
-            body=review_body,
-            event="COMMENT",  # COMMENT | APPROVE | REQUEST_CHANGES
-        )
+        kwargs = {
+            "body": review_body,
+            "event": "COMMENT"
+        }
+        if comments:
+            kwargs["comments"] = comments
 
-        log.info(f"✅ Review posted: {pr.html_url}")
+        pr.create_review(**kwargs)
+
+        log.info(f"✅ Review posted with {len(comments) if comments else 0} inline comments: {pr.html_url}")
         return pr.html_url
 
     def post_issue_comment(

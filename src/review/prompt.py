@@ -61,7 +61,9 @@ Please review all the changed files in this Pull Request on branch `{pr.branch}`
 [One sentence justification for the score]
 ---
 
-Be specific. Reference file names and line numbers where possible.
+Be specific. If you want to suggest a change on a specific line, format it as a bullet point starting with the file path and line number, like this:
+- `file_path:line_number`: Suggestion body
+
 Be constructive — the goal is to help the author improve the code, not to criticize.
 """
 

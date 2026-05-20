@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from src.jules.client import JulesActivity
 from src.github_client.client import PRContext
@@ -5,8 +6,23 @@ from src.github_client.client import PRContext
 
 def extract_review_text(activities: list) -> str:
     """Extract meaningful review text from Jules's activity list."""
-    review_parts = []
+    # ── Try High-Fidelity Extraction (agentMessage) ───────────────
+    agent_messages = []
+    for activity in activities:
+        if activity.originator != "agent":
+            continue
+        raw = activity.raw or {}
+        agent_messaged = raw.get("agentMessaged", {})
+        if agent_messaged:
+            msg = agent_messaged.get("agentMessage")
+            if msg:
+                agent_messages.append(msg)
 
+    if agent_messages:
+        return "\n\n".join(agent_messages)
+
+    # ── Fallback: Stitch Progress Title/Description ───────────────
+    review_parts = []
     skip_keywords = ["npm install", "Installing", "Setup the environment", "bash command"]
 
     for activity in activities:
@@ -25,6 +41,76 @@ def extract_review_text(activities: list) -> str:
             review_parts.append(activity.progress_title)
 
     return "\n\n".join(review_parts) if review_parts else ""
+
+
+def parse_inline_suggestions(review_text: str, files_changed: list) -> list:
+    """
+    Parses line-level review suggestions from the generated review text.
+    We search for patterns referencing files in the PR and line numbers.
+    """
+    suggestions = []
+    if not review_text or not files_changed:
+        return suggestions
+
+    changed_files_set = set(files_changed)
+    lines = review_text.split('\n')
+
+    for i, line in enumerate(lines):
+        # Look for a changed file path in the line
+        found_file = None
+        for f in changed_files_set:
+            if f in line:
+                found_file = f
+                break
+
+        if not found_file:
+            continue
+
+        # Find line number (e.g. :42 or line 42 or L42)
+        line_match = re.search(r'(?:[:#]|\bline\b|\bL\b)\s*(\d+)', line, re.IGNORECASE)
+        if not line_match and i + 1 < len(lines):
+            # Check the next line in case it is on a separate line
+            line_match = re.search(r'\b(?:line|L)?\s*(\d+)\b', lines[i+1], re.IGNORECASE)
+
+        if line_match:
+            try:
+                line_num = int(line_match.group(1))
+            except ValueError:
+                continue
+
+            # Extract the body of the suggestion
+            body_lines = []
+            cleaned_first_line = re.sub(rf'`?{re.escape(found_file)}`?', '', line)
+            cleaned_first_line = re.sub(r'(?:[:#]|\bline\b|\bL\b)\s*\d+', '', cleaned_first_line, flags=re.IGNORECASE)
+            cleaned_first_line = cleaned_first_line.strip(' :-*`#\t[]')
+
+            if cleaned_first_line:
+                body_lines.append(cleaned_first_line)
+
+            # Look ahead for more explanation lines belonging to this suggestion
+            j = i + 1
+            while j < len(lines):
+                next_line = lines[j].strip()
+                if not next_line:
+                    break
+                if next_line.startswith('##'):
+                    break
+                if any(f in next_line for f in changed_files_set):
+                    break
+                body_lines.append(next_line.lstrip(' -*\t[]'))
+                j += 1
+
+            body = "\n".join(body_lines).strip()
+            if body:
+                suggestions.append({
+                    "path": found_file,
+                    "line": line_num,
+                    "side": "RIGHT",
+                    "body": f"🤖 **Jules AI Suggestion:**\n\n{body}"
+                })
+
+    return suggestions
+
 
 
 def format_review_comment(
