@@ -19,9 +19,11 @@ Or via environment variables (set by GitHub Actions automatically):
 import sys
 import argparse
 import os
+from typing import Optional
 
 from src.config.env import config
 from src.utils.logger import log
+from src.utils.db import init_db
 from src.jules.client import JulesClient
 from src.github_client.client import GitHubClient
 from src.review.prompt import build_review_prompt
@@ -34,17 +36,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--owner", default=os.getenv("REPO_OWNER"), help="GitHub repo owner")
     parser.add_argument("--repo",  default=os.getenv("REPO_NAME"),  help="GitHub repo name")
     parser.add_argument("--pr",    default=os.getenv("PR_NUMBER"),   help="PR number", type=int)
+    parser.add_argument("--token", default=os.getenv("GITHUB_TOKEN"),  help="GitHub Personal Access Token or Action Token")
     return parser.parse_args()
 
 
-def run(owner: str, repo: str, pr_number: int) -> None:
+def run(owner: str, repo: str, pr_number: int, token: Optional[str] = None) -> None:
     log.info("=" * 60)
     log.info(f"🚀 Jules PR Reviewer starting")
     log.info(f"   Repo:  {owner}/{repo}")
     log.info(f"   PR:    #{pr_number}")
     log.info("=" * 60)
 
-    gh_client    = GitHubClient()
+    # ── Resolve GitHub Token ──────────────────────────────────────
+    resolved_token = token or config.GITHUB_TOKEN
+    if not resolved_token:
+        log.error(
+            "❌ GitHub token not provided. Please provide --token, "
+            "set GITHUB_TOKEN environment variable, or define GITHUB_TOKEN in your .env file."
+        )
+        sys.exit(1)
+
+    gh_client    = GitHubClient(resolved_token)
     jules_client = JulesClient()
     poller       = ReviewPoller(jules_client)
 
@@ -90,6 +102,7 @@ def run(owner: str, repo: str, pr_number: int) -> None:
 
 
 def main() -> None:
+    init_db()
     args = parse_args()
 
     if not args.owner or not args.repo or not args.pr:
@@ -98,7 +111,7 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        run(args.owner, args.repo, int(args.pr))
+        run(args.owner, args.repo, int(args.pr), args.token)
     except KeyboardInterrupt:
         log.info("Interrupted by user.")
         sys.exit(0)
